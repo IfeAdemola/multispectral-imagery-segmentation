@@ -5,6 +5,17 @@ Created: MG 2024-02-19
 This readme shall keep tracks of meetings, outcomes and todos.
 General admin docs related to the MSc thesis can be added to the folder.
 
+## 2024-02-27 - meeting at Greenspin
+- agreed to focus on forrestation Bavaria
+- data will come from Greenpsin pre-process in a format easy to work for us (circe end of March)
+- working procedures:
+  - progress meetings cca every 2 weeks
+  - Esther preferably working from CAIRO offices but Greenspin available for Q&A 
+- TODO AE:
+  - prepare project proposal
+  - read and follow upon todos from 2024-02-21
+- meeting details: ![20240227_Whiteboard.jpg](20240227_Whiteboard.jpg)
+
 ## 2024-02-21
 - the story about Amazon rainforest needs to change to some other cause Max has dropped out from the supervision
 - TODO MG: speak to Greenspin to find another application and secure the data
