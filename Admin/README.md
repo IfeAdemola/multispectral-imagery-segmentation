@@ -5,6 +5,16 @@ Created: MG 2024-02-19
 This readme shall keep tracks of meetings, outcomes and todos.
 General admin docs related to the MSc thesis can be added to the folder.
 
+## 2024-03-05
+- Changes to the thesis proposal reagrding the scope of the thesis and the proposed methodology
+- Working procedures
+  - Progress meeting every Monday 10:00-11:00
+  - EA was allocated a workplace in CAIRO
+- TODO EA:
+  - New proposal: should be done by Friday 08.03.2024
+- Meeting details: ![2024-03-05_Whiteboard.jpeg](2024-03-05_Whiteboard.jpeg)
+  
+
 ## 2024-02-27 - meeting at Greenspin
 - agreed to focus on forrestation Bavaria
 - data will come from Greenpsin pre-process in a format easy to work for us (circe end of March)
