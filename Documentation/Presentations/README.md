@@ -1,1 +1,1 @@
-Presentation slides through the course if the thesis
+Presentation slides through the course of the thesis
