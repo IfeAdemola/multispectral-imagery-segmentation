@@ -7,6 +7,10 @@ TODO.md
 # C extensions
 *.so
 
+# data and models
+*.pkl
+\data
+
 # Distribution / packaging
 .Python
 build/
