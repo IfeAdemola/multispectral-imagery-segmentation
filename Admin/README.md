@@ -5,6 +5,16 @@ Created: MG 2024-02-19
 This readme shall keep tracks of meetings, outcomes and todos.
 General admin docs related to the MSc thesis can be added to the folder.
 
+## 2024-04-24
+- Make sure the data is in a suitable form for the loss calculation
+- Use a smaller ResNet backbone (e.g. ResNet-50) for the Deeplabv2  model training
+- Is deeplabv2 from torch vision pretrained? Using pretrained model or from scratch?
+- Take into consideration the weather season of the images. Create a new channel and assign it a unique int value through all pixels of the image for each time stamp
+- A new channel where the set deforested is split into subset based on the vegetation cover of the pixel
+- This new mask channel could be regarded as a regression task 0:invalid 1:soil, 2:low grass, 3:high grass, 4:partial tress, 5:forest
+- Define the loss by removing the invalid pixels (i.e. mask =0). This results in a faster and easier learning network
+- Structure of code 
+
 ## 2024-03-05
 - Changes to the thesis proposal reagrding the scope of the thesis and the proposed methodology
 - Working procedures
