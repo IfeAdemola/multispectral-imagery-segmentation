@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 class Forest(Dataset):
     """PyTorch dataset class for loading numpy arrays from pickle files"""
 
-    def __init__(self, root_dir, transform=None):
+    def __init__(self, root_dir, label=False, transform=None):
         """
         Args:
             root_dir (string): Directory with pickle files.
@@ -23,6 +23,7 @@ class Forest(Dataset):
         self.root_dir = root_dir
         # self.mean = mean
         # self.std = std
+        self.label = label
         self.transform = transform
         self.file_list = [f for f in os.listdir(root_dir) if f.endswith('.pkl')]
         # self.normalize = transforms.Normalize(mean=self.mean, std=self.std)
@@ -40,8 +41,11 @@ class Forest(Dataset):
             sample = pickle.load(f)
 
         # Extract image and mask from the numpy array
-        image = sample[:, :, :-1]  # first 10 channels are image
-        mask = sample[:, :, -1]  # last channel is the mask
+        image = sample[:, :, :11]  # first 10 channels are image
+        if self.label == False:
+            mask = sample[:, :, 12]  # region type [0,1,2]
+        elif self.label == True:
+            mask = sample[:,:,11]  # more specific region type [0,1,...,5]
 
         #Normalise the image
         min_val = np.min(image)
