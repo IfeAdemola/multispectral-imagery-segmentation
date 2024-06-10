@@ -20,9 +20,6 @@ from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet
 from torchvision.models import ResNet50_Weights
 
 
-
-
-
 class ModelTrainer:
         
     def __init__(self, args):
