@@ -10,6 +10,7 @@ TODO.md
 # data and models
 *.pkl
 \data
+\wandb
 
 # Distribution / packaging
 .Python
