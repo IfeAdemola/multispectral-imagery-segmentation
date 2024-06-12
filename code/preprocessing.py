@@ -5,6 +5,7 @@ import numpy as np
 import re
 import random 
 import cv2
+import argparse
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from utils import *
@@ -80,7 +81,7 @@ def combine_data_label(root_dir):
     mask = 'without_trees'
     arrays = {key: value for key, value in arrays.items() if mask not in key}
 
-    return   # dict
+    return   arrays # dict
 
 def generate_segmentation_masks(arrays):
     """
@@ -180,7 +181,7 @@ def generate_segmentation_masks(arrays):
 
     return arrays
 
-def swap_channels(array):
+def swap_channels(arrays):
     """
     Swap specified channels in a multidimensional array.
 
@@ -214,8 +215,16 @@ def swap_channels(array):
     - The channel indices 10, 11, and 12 refer to specific uses in the array 
       (segmentation masks and seasonal mask) and are directly swapped.
     """
-    array[..., [11, 12, 10]] = array[..., [10, 11, 12]]
-    return array
+    swapped_arrays = {}
+    for key, array in arrays.items():
+        if array.shape[-1] < 13:
+            raise ValueError(f"Array associated with key '{key}' has fewer than 13 channels.")
+        
+        # Swap the channels
+        array[..., [11, 12, 10]] = array[..., [10, 11, 12]]
+        swapped_arrays[key] = array
+
+    return swapped_arrays
 
 def unique_values_dict(arrays):
     """Get the unique values in a dictionary"""
@@ -340,5 +349,45 @@ def process_and_augment_pickles(input_dir, output_dir, quantity):
                 output_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}_aug{i}.pkl")
                 with open(output_path, 'wb') as f:
                     pickle.dump(augmented_array, f)
+
+def save_arrays(arrays, destination_dir):
+    """
+    Save arrays to the specified directory.
+
+    Parameters:
+    arrays (dict): Dictionary where keys are filenames and values are arrays to save.
+    destination_dir (str): Directory where the files will be saved.
+    """
+    # Ensure the destination directory exists
+    if not os.path.exists(destination_dir):
+        os.makedirs(destination_dir)
+
+    for filename, array in arrays.items():
+        file_path = os.path.join(destination_dir, f"{filename}.pkl")
+        try:
+            with open(file_path, 'wb') as file:
+                pickle.dump(array, file)
+            print(f"Saved {filename} to {file_path}")
+        except Exception as e:
+            print(f"An error occurred while saving {filename}: {e}")
             
 
+def main(root_dir, destination_dir, patch_size, stride):
+    combined_arrays = combine_data_label(root_dir)
+    seg_masks = generate_segmentation_masks(combined_arrays)
+    preprocessed_arrays = swap_channels(seg_masks)
+    save_arrays(preprocessed_arrays, destination_dir)
+    file_paths = get_file_paths(destination_dir)
+    for path in file_paths:
+        to_patches(path, patch_size, stride)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process some arrays.")
+    parser.add_argument('root_dir', type=str, help="The root directory containing the .pkl files.")
+    parser.add_argument('destination_dir', type=str, help="The directory to save the processed arrays in .pkl files.")
+
+    parser.add_argument('stride', type=int, help="stride for creating patches")
+    parser.add_argument('patch_size', type=int, help="width and heaight of patches")
+    args = parser.parse_args()
+    main(args.root_dir, args.destination_dir)
