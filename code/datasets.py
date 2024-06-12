@@ -87,6 +87,8 @@ class Forest(Dataset):
 
         self.label = label
 
+        self.selected_bands = load_bands(self.use_rgb, self.use_lr, self.use_mr, self.use_season)
+
         self.n_inputs = get_ninputs(use_rgb, use_lr, use_mr, use_season)
         if label:
             self.num_classes = 6
