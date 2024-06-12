@@ -58,11 +58,13 @@ def display_input(array):
     image_corrected_rgb = image_corrected[..., ::-1]
     return image_corrected_rgb
 
-def display_label(array):
-    cmap = mycmap()
-    vmin = np.min(array)
-    vmax = np.max(array)
-    norm = colors.Normalize(vmin=0, vmax=2) # not sure which works better cuz some images have just 2 labels
+def display_label(array, label_structure):
+    cmap = mycmap(label_structure)
+
+    if len(cmap.colors) == 3:
+        norm = colors.Normalize(vmin=0, vmax=2) # not sure which works better cuz some images have just 2 labels
+    elif len(cmap.colors) == 6:
+        norm = colors.Normalize(vmin=0, vmax=5)
     array = cmap(norm(array))
     array_uint8 = (array * 255).astype(np.uint8)
 
@@ -164,22 +166,22 @@ def plot_label(array):
 #     plt.title(f'Band {12 + 1}')  # Add title with band index
 #     plt.show()
 
-def mycmap():
-    cmap = colors.ListedColormap(["#CCCCCC",
-                                  "#D2B48C",
-                                  "#228B22"
-                                ])
-    return cmap
+# def mycmap():
+#     cmap = colors.ListedColormap(["#CCCCCC",
+#                                   "#D2B48C",
+#                                   "#228B22"
+#                                 ])
+#     return cmap
 
-# def classnames(label_structure=False):
-#     if label_structure:
-#         names = ["Invalid", "Soil", "Low grass", "High grass", "Partial trees", "Forest"]
-#     else:
-#         names = ["Invalid", "Forest", "Deforested"]
-#     return names
+def classnames(label_structure=False):
+    if label_structure:
+        names = ["Invalid", "Soil", "Low grass", "High grass", "Partial trees", "Forest"]
+    else:
+        names = ["Invalid", "Deforested", "Forest"]
+    return names
 
-def classnames():
-    return ["Invalid", "Deforested", "Forest"]
+# def classnames():
+#     return ["Invalid", "Deforested", "Forest"]
 
 def labels(label_structure):
     l = {}
@@ -187,21 +189,19 @@ def labels(label_structure):
         l[i] = label
         return l
 
-# def mycmap(label=False):
-#     if label:
-#         cmap = colors.ListedColormap(["#CCCCCC",
-#                                     "#D2B48C",
-#                                     "#90EE90",
-#                                     "#006400",
-#                                     "#556B2F",
-#                                     "#228B22",
-#                                     "#FFFFFF"])
-#     else:
-#         cmap = colors.ListedColormap(["#CCCCCC",
-#                                       "#228B22",
-#                                       "#D2B48C",
-#                                       "#FFFFFF"])
-#     return cmap
+def mycmap(label_structure=False):
+    if label_structure:
+        cmap = colors.ListedColormap(["#CCCCCC",
+                                    "#D2B48C",
+                                    "#90EE90",
+                                    "#006400",
+                                    "#556B2F",
+                                    "#228B22"])  # ,"#FFFFFF"
+    else:
+        cmap = colors.ListedColormap(["#CCCCCC",
+                                      "#D2B48C",
+                                      "#228B22"])
+    return cmap
 
 def mypatches():
     patches = []

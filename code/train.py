@@ -26,7 +26,7 @@ class ModelTrainer:
     def __init__(self, args):
         self.args = args
 
-    def train(self, model, train_loader, val_loader,
+    def train(self, label_structure, model, train_loader, val_loader,
               criterion, optimiser, max_epochs, step=0):
         
         # Initialize the scheduler
@@ -89,7 +89,7 @@ class ModelTrainer:
 
             # Log metrices and loss
             # class_names = utils.classnames()
-            class_names = utils.classnames()[1:]
+            class_names = utils.classnames(label_structure)[1:]
             train_metrics = {f"Train IoU {class_name}": iou for class_name, iou in zip(class_names, train_iou)}
             train_metrics["Train overall IoU"] = train_miou
             train_metrics["Train loss"] = average_epoch_loss
@@ -106,7 +106,7 @@ class ModelTrainer:
                 
         return model
     
-    def val(self, model, dataloader, criterion, epoch):
+    def val(self, label_structure, model, dataloader, criterion, epoch):
 
         # set model to evaluation mode
         model.eval()
@@ -169,8 +169,8 @@ class ModelTrainer:
                 in_log = images[random_idx, ...]
                 in_log = in_log.permute(1,2,0)
                 input_log = utils.display_input(in_log.cpu().numpy())
-                pred_log = utils.display_label(preds[random_idx,...].cpu().numpy())
-                gt_log = utils.display_label(labels[random_idx,...].cpu().numpy())
+                pred_log = utils.display_label(preds[random_idx,...].cpu().numpy(), label_structure)
+                gt_log = utils.display_label(labels[random_idx,...].cpu().numpy(), label_structure)
                 images_log = [input_log, gt_log, pred_log]
 
                 wandb.log({"Images": [wandb.Image(i) for i in images_log]})
@@ -212,7 +212,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     #input/output
-    parser.add_argument('--label', action='store_true', default=False,
+    parser.add_argument('--label_structure', action='store_true', default=False,
                         help='labelling structure; True if labelling is more specific (6 classes), else False (3 classes)')
     parser.add_argument('--use_rgb', action='store_true', default=False,
                         help='use sentinel-2 rgb bands')
