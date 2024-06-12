@@ -8,6 +8,7 @@ import utils
 import wandb
 import metrics
 import torch.nn as nn
+import torch.optim.lr_scheduler as lr_scheduler
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -27,6 +28,9 @@ class ModelTrainer:
 
     def train(self, model, train_loader, val_loader,
               criterion, optimiser, max_epochs, step=0):
+        
+        # Initialize the scheduler
+        scheduler = lr_scheduler.CosineAnnealingLR(optimiser, T_max=max_epochs, eta_min=0)
         
         # Tell wandb to watch what the model gets up to: gradients, weights, and more!
         wandb.watch(model, criterion, log="all", log_freq=10)
@@ -91,6 +95,9 @@ class ModelTrainer:
             train_metrics["Train loss"] = average_epoch_loss
             train_metrics["epoch"] = epoch + 1
             wandb.log(train_metrics) 
+
+            # Update the scheduler
+            scheduler.step()
 
             # run validation
             self.val(model, val_loader, criterion, epoch)
@@ -269,6 +276,8 @@ def main():
                            use_season=args.use_season)
     num_classes = train_dataset.num_classes
     num_inputs = train_dataset.n_inputs
+    selected_bands = train_dataset.selected_bands
+
     print(f"Size of train data: {len(train_dataset)}")
     print(f"num_inputs: {num_inputs}")
     val_dataset = Forest(args.data_dir_val,
@@ -327,7 +336,7 @@ def main():
     current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")  # Format current datetime
     run_name = f"{args.model}_epochs{max_epochs}_{current_datetime}"
     
-    wandb.init(project="Thesis", 
+    wandb.init(project="Thesis_experiments", 
                      name = run_name, 
                      config=args)  # Initialize W&B
     # config = wandb.config
@@ -335,6 +344,24 @@ def main():
     # train network
     trainer = ModelTrainer(args)
     model = trainer.train(model, train_loader, val_loader, criterion, optimiser, max_epochs)
+
+    # Save the trained model locally
+    model_save_path = f"trained_model_{current_datetime}.pth"
+    torch.save(model.state_dict(), model_save_path) 
+
+    # Create and log a W&B artifact
+    artifact = wandb.Artifact(
+        name=f"{args.model}_artifact",
+        type="model",
+        description=f"Trained model for {args.model} at {current_datetime}",
+        metadata={"epochs": max_epochs, "model": args.model, "batch_size": args.batch_size, "loss": criterion, "optimiser": optimiser, "label": args.label, "bands": selected_bands}  # Add any additional metadata here
+    )
+
+    # Add the local model file to the artifact
+    artifact.add_file(model_save_path)
+
+    # Log the artifact to W&B
+    wandb.log_artifact(artifact)
 
     wandb.finish()
         
@@ -345,5 +372,6 @@ if __name__ == "__main__":
 
 
 # python train.py --label --use_rgb --use_lr --use_mr --use_season --lr 0.001 --batch_size 64 --max_epochs 2 --model deeplab --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/31.05/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/31.05/eval"
-# python train.py --use_rgb --use_lr --use_season --lr 0.001 --batch_size 32 --max_epochs 150 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/08.06/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/08.06/val"
+# python train.py --use_rgb --use_lr --use_season --lr 0.001 --batch_size 64 --max_epochs 200 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/08.06/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/08.06/val"
+# python train.py --use_rgb --lr 0.001 --batch_size 64 --max_epochs 200 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/08.06/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/08.06/val"
 
