@@ -100,10 +100,8 @@ class ModelTrainer:
             scheduler.step()
 
             # run validation
-            self.val(model, val_loader, criterion, epoch)
-        
-        wandb.finish()
-                
+            self.val(label_structure, model, val_loader, criterion, epoch)
+                       
         return model
     
     def val(self, label_structure, model, dataloader, criterion, epoch):
@@ -156,7 +154,8 @@ class ModelTrainer:
 
             # Log metrices and loss
             # class_names = utils.classnames()
-            class_names = utils.classnames()[1:]
+            class_names = utils.classnames(label_structure)[1:]
+            print(class_names)
             val_metrics = {f"Val IoU {class_name}": iou for class_name, iou in zip(class_names, val_iou)}
             val_metrics["Val overall IoU"] = val_miou
             val_metrics["Val loss"] = avg_epoch_loss
@@ -268,7 +267,7 @@ def main():
     ])
     # load datasets
     train_dataset = Forest(args.data_dir_train,
-                           label=args.label,
+                           label_structure=args.label_structure,
                            transform=transform,
                            use_rgb=args.use_rgb,                           
                            use_lr=args.use_lr,
@@ -279,14 +278,17 @@ def main():
     selected_bands = train_dataset.selected_bands
 
     print(f"Size of train data: {len(train_dataset)}")
-    print(f"num_inputs: {num_inputs}")
+    print(f"Train num_inputs: {num_inputs}")
     val_dataset = Forest(args.data_dir_val,
-                           label=args.label,
+                           label_structure=args.label_structure,
                            transform=transform,
                            use_rgb=args.use_rgb,                           
                            use_lr=args.use_lr,
                            use_mr=args.use_mr,
                            use_season=args.use_season)
+    print(f"VAL num_inputs: {val_dataset.n_inputs}")
+    print(f"VAL num_classses: {val_dataset.num_classes}")
+
 
     # set up dataloaders
     train_loader = DataLoader(train_dataset,
@@ -323,6 +325,9 @@ def main():
     # define number of epochs
     max_epochs = args.max_epochs 
 
+    # define label structure
+    label_structure = args.label_structure
+
     # class weights
     # class_weights = torch.tensor([0,0.9,0.1]).cuda()
     # define loss function
@@ -334,27 +339,31 @@ def main():
 
     # set up weight and biases logging
     current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")  # Format current datetime
-    run_name = f"{args.model}_epochs{max_epochs}_{current_datetime}"
+    if label_structure:
+        ls = 1   # extended segmentation map
+    else:
+        ls = 0   # segmentation map
+    run_name = f"{args.model}_{str(selected_bands)}_{ls}"
     
+    print("Attempting to initialize W&B...")
     wandb.init(project="Thesis_experiments", 
-                     name = run_name, 
+                     name=run_name, 
                      config=args)  # Initialize W&B
-    # config = wandb.config
 
     # train network
     trainer = ModelTrainer(args)
-    model = trainer.train(model, train_loader, val_loader, criterion, optimiser, max_epochs)
+    model = trainer.train(label_structure, model, train_loader, val_loader, criterion, optimiser, max_epochs)
 
     # Save the trained model locally
-    model_save_path = f"trained_model_{current_datetime}.pth"
+    model_save_path =  f"/home/k45848/multispectral-imagery-segmentation/models/{args.model}_{str(selected_bands)}_{ls}.pth" #f"{args.model}_{current_datetime}.pth"
     torch.save(model.state_dict(), model_save_path) 
 
     # Create and log a W&B artifact
     artifact = wandb.Artifact(
-        name=f"{args.model}_artifact",
+        name=f"{args.model}_{str(selected_bands)}_{ls}_artifact",
         type="model",
         description=f"Trained model for {args.model} at {current_datetime}",
-        metadata={"epochs": max_epochs, "model": args.model, "batch_size": args.batch_size, "loss": criterion, "optimiser": optimiser, "label": args.label, "bands": selected_bands}  # Add any additional metadata here
+        metadata={"epochs": max_epochs, "model": args.model, "batch_size": args.batch_size, "loss": criterion, "optimiser": optimiser, "label": args.label_structure, "bands": selected_bands}  # Add any additional metadata here
     )
 
     # Add the local model file to the artifact
@@ -373,5 +382,5 @@ if __name__ == "__main__":
 
 # python train.py --label --use_rgb --use_lr --use_mr --use_season --lr 0.001 --batch_size 64 --max_epochs 2 --model deeplab --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/31.05/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/31.05/eval"
 # python train.py --use_rgb --use_lr --use_season --lr 0.001 --batch_size 64 --max_epochs 200 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/08.06/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/08.06/val"
-# python train.py --use_rgb --lr 0.001 --batch_size 64 --max_epochs 200 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/08.06/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/08.06/val"
+# python train.py --label --use_rgb --lr 0.001 --batch_size 64 --max_epochs 200 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/08.06/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/08.06/val"
 
