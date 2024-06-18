@@ -355,7 +355,7 @@ def main():
     model = trainer.train(label_structure, model, train_loader, val_loader, criterion, optimiser, max_epochs)
 
     # Save the trained model locally
-    model_save_path =  f"/home/k45848/multispectral-imagery-segmentation/models/{args.model}_{str(selected_bands)}_{ls}.pth" #f"{args.model}_{current_datetime}.pth"
+    model_save_path =  f"/home/k45848/multispectral-imagery-segmentation/trained_models/{args.model}_{str(selected_bands)}_{ls}.pth" #f"{args.model}_{current_datetime}.pth"
     torch.save(model.state_dict(), model_save_path) 
 
     # Create and log a W&B artifact
