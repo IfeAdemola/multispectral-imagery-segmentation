@@ -11,6 +11,7 @@ TODO.md
 *.pkl
 \data
 \wandb
+\trained_models
 
 # Distribution / packaging
 .Python
