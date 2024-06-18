@@ -180,9 +180,6 @@ def classnames(label_structure=False):
         names = ["Invalid", "Deforested", "Forest"]
     return names
 
-# def classnames():
-#     return ["Invalid", "Deforested", "Forest"]
-
 def labels(label_structure):
     l = {}
     for i, label in enumerate(classnames(label_structure)):
