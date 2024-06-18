@@ -59,7 +59,7 @@ def get_ninputs(use_rgb, use_lr, use_mr, use_season):
 class Forest(Dataset):
     """PyTorch dataset class for loading numpy arrays from pickle files"""
 
-    def __init__(self, root_dir, label=False, transform=None, 
+    def __init__(self, root_dir, label_structure=False, transform=None, 
                  use_rgb=False, use_lr=False, use_mr=False, use_season=False):
         """
         Args:
@@ -85,17 +85,17 @@ class Forest(Dataset):
         self.use_mr = use_mr
         self.use_season = use_season
 
-        self.label = label
+        self.label_structure = label_structure
 
         self.selected_bands = load_bands(self.use_rgb, self.use_lr, self.use_mr, self.use_season)
 
         self.n_inputs = get_ninputs(use_rgb, use_lr, use_mr, use_season)
-        if label:
+        if label_structure:
             self.num_classes = 6
-            self.label = True
+            self.label_structure = True
         else:
             self.num_classes = 3
-            self.label = False
+            self.label_structure = False
 
         self.transform = transform
         self.file_list = [f for f in os.listdir(root_dir) if f.endswith('.pkl')]
@@ -116,9 +116,9 @@ class Forest(Dataset):
         # Extract image and mask from the numpy array
         image = sample[:,:, load_bands(self.use_rgb, self.use_lr, self.use_mr, self.use_season)]
 
-        if self.label == False:
+        if self.label_structure == False:
             mask = sample[:, :, 11]  # region type [0,1,2]
-        elif self.label == True:
+        elif self.label_structure == True:
             mask = sample[:,:,12]  # more specific region type [0,1,...,5]
 
         #Normalise the image
