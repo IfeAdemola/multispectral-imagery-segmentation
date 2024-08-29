@@ -1,24 +1,29 @@
-import numpy as np
-import os
-import torch
-import torch.optim as optim
 import argparse
+import os
 import random
-import utils
-import wandb
-import metrics
-import torch.nn as nn
-import torch.optim.lr_scheduler as lr_scheduler
-
-from torch.utils.data import DataLoader
-from torchvision import transforms
-from tqdm import tqdm
-from datasets import Forest, ToTensor
-from models.unet import UNet
+import re
 from datetime import datetime
 
-from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet50_Weights
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
+from scipy.ndimage import binary_dilation, binary_erosion
+from torch.utils.data import DataLoader
+from torchvision import transforms
 from torchvision.models import ResNet50_Weights
+from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
+                                             deeplabv3_resnet50)
+from tqdm import tqdm
+
+import metrics
+import utils
+import wandb
+from datasets import Forest, ToTensor
+from loss.focal_loss import FocalLoss
+from models.unet import UNet
 
 
 class ModelTrainer:
@@ -27,7 +32,8 @@ class ModelTrainer:
         self.args = args
 
     def train(self, label_structure, model, train_loader, val_loader,
-              criterion, optimiser, max_epochs, step=0):
+              criterion, optimiser, max_epochs, do_reweighting=False, 
+              high_conf_weight=1.0, low_conf_weight=0.5, structure_size=3):  
         
         # Initialize the scheduler
         scheduler = lr_scheduler.CosineAnnealingLR(optimiser, T_max=max_epochs, eta_min=0)
@@ -49,8 +55,12 @@ class ModelTrainer:
                     if self.args.use_gpu:
                         images, labels = images.cuda(), labels.cuda()
 
-                    # Create masks based on your criteria (example: ignore classes 0 and 2)
-                    mask = (labels != 0).float()
+                    
+                    "no longer necessary: criterion (focal loss or not already covers this)"
+                    # Create masks based on your criteria 
+                    if do_reweighting:
+                        # Use the custom reweighting mask
+                        mask = self.create_weight_mask(labels, high_conf_weight, low_conf_weight, structure_size)
 
                     # reset gradients
                     optimiser.zero_grad()
@@ -60,24 +70,22 @@ class ModelTrainer:
                     if isinstance(outputs, dict) and 'out' in outputs:
                         outputs = outputs['out']
 
-                    # calculate loss
-                    loss = criterion(outputs, labels)  #batch_loss
-                    masked_loss = (loss*mask).sum()/mask.sum()
+                    # Calculate raw loss
+                    loss = criterion(outputs, labels)  # Batch Per-pixel loss
 
-                    # backward pass and optimize
-                    masked_loss.backward()
+                    # Backward pass and optimize
+                    loss.backward()
                     optimiser.step()
 
                     preds = torch.argmax(outputs, dim=1)
-                    epoch_loss += masked_loss.item() * images.size(0)
+                    epoch_loss += loss.item() * images.size(0)
 
                     train_conf_mat.add_batch(labels, preds)
-
 
                     # Update progress bar
                     pbar.set_postfix(loss=epoch_loss/(pbar.n+1) * train_loader.batch_size)
                     pbar.set_description("[Train] Loss: {:.4f}".format(
-                    round(masked_loss.item(), 4)))       
+                    round(loss.item(), 4)))       
                     
             # Calculate the loss and IoU per epoch
             average_epoch_loss = epoch_loss / len(train_loader.dataset)            
@@ -85,10 +93,9 @@ class ModelTrainer:
             train_miou = train_conf_mat.get_mIoU() # float mean iou per epoch
             print(f'[Train] Average epoch loss: {average_epoch_loss:.4f}')
 
-            pbar.close()
+            # pbar.close()
 
             # Log metrices and loss
-            # class_names = utils.classnames()
             class_names = utils.classnames(label_structure)[1:]
             train_metrics = {f"Train IoU {class_name}": iou for class_name, iou in zip(class_names, train_iou)}
             train_metrics["Train overall IoU"] = train_miou
@@ -108,92 +115,105 @@ class ModelTrainer:
 
         # set model to evaluation mode
         model.eval()
-
-        # main validation loop
-        epoch_loss = 0
+        val_loss = 0
         conf_mat = metrics.ConfusionMatrix(dataloader.dataset.num_classes)
-        with tqdm(dataloader, desc="[Val]", unit="batch") as pbar:
-            for idx, (images, labels) in enumerate(pbar):
 
-                if self.args.use_gpu:
-                    images, labels = images.cuda(), labels.cuda()
+        with torch.no_grad(): # disable gradient calculation
+            with tqdm(dataloader, desc="[Val]", unit="batch") as pbar:
+                for idx, (images, labels) in enumerate(pbar):
 
-                # Create masks based on your criteria (example: ignore classes 0 and 2)
-                    mask = (labels != 0).float()
+                    if self.args.use_gpu:
+                        images, labels = images.cuda(), labels.cuda()
 
-                # Forward pass
-                with torch.no_grad():
+                    # Forward pass
                     outputs = model(images)
                     if isinstance(outputs, dict) and 'out' in outputs:
                         outputs = outputs['out']
 
-                # Loss calculation
-                loss = criterion(outputs, labels) #batch_loss
-                masked_loss = (loss*mask).sum()/mask.sum()
+                    # Loss calculation
+                    loss = criterion(outputs, labels) #batch_loss
+
+                    preds = torch.argmax(outputs, dim=1)
+                    val_loss += loss.item()*images.size(0)  #changed from masked_loss to loss
+
+                    # calculate error metrics
+                    conf_mat.add_batch(labels, preds)
+                    aa = conf_mat.get_aa()
+                    miou = conf_mat.get_mIoU()
+
+                    # Update progress bar
+                    pbar.set_postfix(loss=val_loss/(pbar.n+1) * dataloader.batch_size) #loss=f"{batch_loss.item():.4f}"
+                    pbar.set_description("[Val] AA: {:.2f}%, IoU: {:.2f}%".format(aa , miou * 100))            
+
+    
+                pbar.close()
                 
-                preds = torch.argmax(outputs, dim=1)
-                epoch_loss += masked_loss.item()*images.size(0)
+                # Average loss and IoU over the evaluation dataset
+                avg_epoch_loss = val_loss / len(dataloader.dataset)
+                val_iou = conf_mat.get_IoU()
+                val_miou = conf_mat.get_mIoU()
+                print(f'[Val] Average epoch loss: {avg_epoch_loss:.4f}')
 
-                # calculate error metrics
-                conf_mat.add_batch(labels, preds)
-                aa = conf_mat.get_aa()
-                miou = conf_mat.get_mIoU()
+                # Log metrices and loss
+                # class_names = utils.classnames()
+                class_names = utils.classnames(label_structure)[1:]
+                val_metrics = {f"Val IoU {class_name}": iou for class_name, iou in zip(class_names, val_iou)}
+                val_metrics["Val overall IoU"] = val_miou
+                val_metrics["Val loss"] = avg_epoch_loss
+                val_metrics["epoch"] = epoch + 1
+                wandb.log(val_metrics)     
 
-                # Update progress bar
-                pbar.set_postfix(loss=epoch_loss/(pbar.n+1) * dataloader.batch_size) #loss=f"{batch_loss.item():.4f}"
-                pbar.set_description("[Val] AA: {:.2f}%, IoU: {:.2f}%".format(aa * 100, miou * 100))            
+                # Log input image, groundtruth and prediction
+                if (epoch +1) % 50 == 0:
+                    random_idx = np.random.randint(preds.size(0))
+                    in_log = images[random_idx, ...]
+                    in_log = in_log.permute(1,2,0)
+                    input_log = utils.display_input(in_log.cpu().numpy())
+                    gt_log = utils.display_label(labels[random_idx,...].cpu().numpy(), label_structure)
 
- 
-            pbar.close()
-            
-            # Average loss and IoU over the evaluation dataset
-            avg_epoch_loss = epoch_loss / len(dataloader.dataset)
-            val_iou = conf_mat.get_IoU()
-            val_miou = conf_mat.get_mIoU()
-            print(f'[Val] Average epoch loss: {avg_epoch_loss:.4f}')
+                    #validity mask (0: invalid 1:valid). Just for display so that it would still show class 0
+                    pred_display_mask = (labels[random_idx, ...].cpu().numpy() != 0).astype(np.uint8)
+                    masked_pred = preds[random_idx, ...].cpu().numpy() * pred_display_mask
+                    # Display the masked predictions
+                    masked_pred_log = utils.display_label(masked_pred, label_structure)
+                    # pred_log = utils.display_label(preds[random_idx,...].cpu().numpy(), label_structure)
+                    images_log = [input_log, gt_log, masked_pred_log]
 
-            # Log metrices and loss
-            # class_names = utils.classnames()
-            class_names = utils.classnames(label_structure)[1:]
-            print(class_names)
-            val_metrics = {f"Val IoU {class_name}": iou for class_name, iou in zip(class_names, val_iou)}
-            val_metrics["Val overall IoU"] = val_miou
-            val_metrics["Val loss"] = avg_epoch_loss
-            val_metrics["epoch"] = epoch + 1
-            wandb.log(val_metrics)     
-
-            # Log input image, groundtruth and prediction
-            if (epoch +1) % 10 == 0:
-                random_idx = np.random.randint(preds.size(0))
-                in_log = images[random_idx, ...]
-                in_log = in_log.permute(1,2,0)
-                input_log = utils.display_input(in_log.cpu().numpy())
-                pred_log = utils.display_label(preds[random_idx,...].cpu().numpy(), label_structure)
-                gt_log = utils.display_label(labels[random_idx,...].cpu().numpy(), label_structure)
-                images_log = [input_log, gt_log, pred_log]
-
-                wandb.log({"Images": [wandb.Image(i) for i in images_log]})
-               
-            model.train()
-
+                    wandb.log({"Images": [wandb.Image(i) for i in images_log]})
+                
+                model.train()
+                    
+    def create_weight_mask(self, labels, high_conf_weight=1.0, low_conf_weight=0.5, structure_size=3):
+        """
+        Creates a weight mask for reweighting loss based on the confidence of pixel labels.
+        Only considers classes 1 (brown) and 2 (green).
         
-    def export_model(self, model, optimiser=None, name=None, step=None):
+        Parameters:
+            labels (Tensor): The ground truth segmentation mask.
+            high_conf_weight (float): Weight for high-confidence pixels.
+            low_conf_weight (float): Weight for low-confidence border pixels.
+            structure_size (int): Size of the structure used for erosion to identify high-confidence pixels.
 
-        if name is not None:
-            out_file = name
-        else:
-            out_file = "checkpoint"
-            if step is not None:
-                out_file += "_step_" + str(step)
-        out_file = os.path.join(self.args.checkpoint_dir, out_file + ".pth")
+        Returns:
+            weight_mask (Tensor): A mask with the same size as labels, with weights applied.
+        """
+        # Convert the labels to a numpy array
+        labels_np = labels.cpu().numpy()
 
-        # save model
-        data = {"model_state_dict": model.state_dict()}
-        if step is not None:
-            data["step"] = step
-        if optimiser is not None:
-            data["optimiser_state_dict"]= optimiser.state_dict()
-        torch.save()
+        # Initialize weight mask with ones for class 2 (green) and zero for class 0 (grey)
+        weight_mask = torch.ones_like(labels, dtype=torch.float32)
+        weight_mask[labels == 0] = 0  # Ignore class 0 (grey)
+
+        # Apply high and low confidence weights to class 1 (brown) only
+        class_1_mask = (labels_np == 1)
+        high_conf_mask = binary_erosion(class_1_mask, structure=np.ones((structure_size, structure_size)))
+
+        # Convert back to tensor and update the weight mask
+        weight_mask[labels == 1] = low_conf_weight  # Low confidence weight for borders
+        weight_mask[torch.tensor(high_conf_mask)] = high_conf_weight  # High confidence weight for inner pixels
+
+        return weight_mask
+
 
     def seed():
         # Ensure deterministic behavior
@@ -215,13 +235,16 @@ def main():
                         help='labelling structure; True if labelling is more specific (6 classes), else False (3 classes)')
     parser.add_argument('--use_rgb', action='store_true', default=False,
                         help='use sentinel-2 rgb bands')
-    parser.add_argument('--use_lr', action='store_true', default=False,
-                        help='use sentinel-2 low-resolution (10 m) bands')
-    parser.add_argument('--use_mr', action='store_true', default=False,
-                        help='use sentinel-2 medium-resolution (20 m) bands')
+    parser.add_argument('--use_red', action='store_true', default=False,
+                        help='use sentinel-2 red bands')
+    parser.add_argument('--use_nir', action='store_true', default=False,
+                        help='use sentinel-2 near infrared (20 m) bands')
+    parser.add_argument('--use_swir', action='store_true', default=False,
+                        help='use sentinel-2 SWIR bands') 
+    parser.add_argument('--use_red_edge', action='store_true', default=False,
+                        help='use sentinel-2 red edge bands')
     parser.add_argument('--use_season', action='store_true', default=False,
                         help='use weather season high-resolution bands')
-    
                         
     # training hyperparameters
     parser.add_argument('--lr', type=float, default=0.01,
@@ -270,8 +293,10 @@ def main():
                            label_structure=args.label_structure,
                            transform=transform,
                            use_rgb=args.use_rgb,                           
-                           use_lr=args.use_lr,
-                           use_mr=args.use_mr,
+                           use_red=args.use_red,
+                           use_nir=args.use_nir,
+                           use_red_edge=args.use_red_edge,
+                           use_swir=args.use_swir,                       
                            use_season=args.use_season)
     num_classes = train_dataset.num_classes
     num_inputs = train_dataset.n_inputs
@@ -283,8 +308,10 @@ def main():
                            label_structure=args.label_structure,
                            transform=transform,
                            use_rgb=args.use_rgb,                           
-                           use_lr=args.use_lr,
-                           use_mr=args.use_mr,
+                           use_red=args.use_red,
+                           use_nir=args.use_nir,
+                           use_red_edge=args.use_red_edge,
+                           use_swir=args.use_swir, 
                            use_season=args.use_season)
     print(f"VAL num_inputs: {val_dataset.n_inputs}")
     print(f"VAL num_classses: {val_dataset.num_classes}")
@@ -327,26 +354,31 @@ def main():
 
     # define label structure
     label_structure = args.label_structure
-
-    # class weights
-    # class_weights = torch.tensor([0,0.9,0.1]).cuda()
-    # define loss function
-    criterion = nn.CrossEntropyLoss(reduction="none")   #weight=class_weights  # ignore_index=0,  weights=torch.tensor([0.1,0.2,0.7]) # can include weights if ds is unbalanced
+    if label_structure:
+        # extended segmentation map
+        ls = 1   
+        # Define class weights (as in the weighted focal loss)
+        alpha = torch.tensor([0, 0.03877981, 0.26108468, 0.48395104, 0.21362894, 0.00255552], dtype=torch.float32).cuda()
+    else:
+        # segmentation map
+        ls = 0   
+        alpha = torch.tensor([0.0, 0.915, 0.085], dtype=torch.float32).cuda()
     
-    # set up optimiser
-    # optimiser = torch.optim.SGD(model.parameters(), lr=args.lr)
+    
+    
+    # Create the focal loss criterion
+    criterion = FocalLoss(alpha=alpha, gamma=2, ignore_index=0) # gamma=0: Crossentropyloss
     optimiser = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+
+    """Cleaner way to set up wandb"""
     # set up weight and biases logging
     current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")  # Format current datetime
-    if label_structure:
-        ls = 1   # extended segmentation map
-    else:
-        ls = 0   # segmentation map
-    run_name = f"{args.model}_{str(selected_bands)}_{ls}"
+    
+    run_name = f"{args.model}_{str(selected_bands)}_{ls}"  #_wsss
     
     print("Attempting to initialize W&B...")
-    wandb.init(project="Thesis_experiments", 
+    wandb.init(project="complex_supervised_29.08", 
                      name=run_name, 
                      config=args)  # Initialize W&B
 
@@ -359,11 +391,13 @@ def main():
     torch.save(model.state_dict(), model_save_path) 
 
     # Create and log a W&B artifact
+    name=f"{args.model}_{str(selected_bands)}_{ls}"  #_wss_artifact
     artifact = wandb.Artifact(
-        name=f"{args.model}_{str(selected_bands)}_{ls}_artifact",
+        name = re.sub(r'[^a-zA-Z0-9_.-]', '-', name),
         type="model",
         description=f"Trained model for {args.model} at {current_datetime}",
-        metadata={"epochs": max_epochs, "model": args.model, "batch_size": args.batch_size, "loss": criterion, "optimiser": optimiser, "label": args.label_structure, "bands": selected_bands}  # Add any additional metadata here
+        metadata={"epochs": max_epochs, "model": args.model, "batch_size": args.batch_size, "loss": criterion, "optimiser": optimiser,
+                   "label": args.label_structure, "bands": selected_bands}  # Add any additional metadata here
     )
 
     # Add the local model file to the artifact
@@ -380,7 +414,4 @@ if __name__ == "__main__":
 
 
 
-# python train.py --label --use_rgb --use_lr --use_mr --use_season --lr 0.001 --batch_size 64 --max_epochs 2 --model deeplab --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/31.05/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/31.05/eval"
-# python train.py --use_rgb --use_lr --use_season --lr 0.001 --batch_size 64 --max_epochs 200 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/08.06/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/08.06/val"
-# python train.py --label --use_rgb --lr 0.001 --batch_size 64 --max_epochs 200 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/08.06/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/08.06/val"
-
+# python train.py --label --use_red --use_nir --lr 0.001 --batch_size 512 --max_epochs 600 --model unet --data_dir_train "/home/k45848/multispectral-imagery-segmentation/data/19.08/train" --data_dir_val "/home/k45848/multispectral-imagery-segmentation/data/19.08/val"
