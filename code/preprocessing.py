@@ -165,11 +165,11 @@ def generate_segmentation_masks(arrays):
     """At this point array has 16 channels: 10 spectral, 1 mask, 4 attributes and 1 veg mask"""
     # Create a new channel to take into account the weather season, making it 17 channels
     if '2023_05'  in key:
-        season_mask = np.zeros(array.shape[:-1]+ (1,))
+        season_mask = np.full(array.shape[:-1]+ (1,), -1)
     elif '2023_09' in key:
-        season_mask = np.ones(array.shape[:-1]+ (1,))
+        season_mask = np.zeros(array.shape[:-1]+ (1,))
     elif '2024_02' in key:
-        season_mask = np.full(array.shape[:-1]+ (1,), 2)     
+        season_mask = np.ones(array.shape[:-1]+ (1,))     
 
     array = np.concatenate((array, season_mask), axis=-1)
 
@@ -292,15 +292,16 @@ def augment_array(array):
         A.Rotate(limit=45, p=1, border_mode=cv2.BORDER_CONSTANT, value=0)
     ])
     
-    # Separate features and masks
-    features = array[:, :, :11]
+    # Separate features, season and masks
+    features = array[:, :, :10] 
+    season = array[:,:,10:11]
     masks = array[:, :, 11:]
     
     # Apply transformation
     augmented = transform(image=features, masks=[masks[:, :, 0], masks[:, :, 1]])
     
     # Combine features and masks again
-    augmented_image = np.concatenate([augmented['image'], np.stack(augmented['masks'], axis=-1)], axis=-1)
+    augmented_image = np.concatenate([augmented['image'], season, np.stack(augmented['masks'], axis=-1)], axis=-1)
     
     return augmented_image
 
@@ -374,20 +375,44 @@ def save_arrays(arrays, destination_dir):
 
 def main(root_dir, destination_dir, patch_size, stride):
     combined_arrays = combine_data_label(root_dir)
+     # Debugging: Print the type of combined_arrays
+    print("Type of combined_arrays:", type(combined_arrays))
+    
+    # Ensure it's a dictionary
+    if not isinstance(combined_arrays, dict):
+        raise ValueError("Expected combined_arrays to be a dictionary.")
+    
+    for key, value in combined_arrays.items():
+        # Debugging: Print the key and type of value
+        print(f"Key: {key}, Type of value: {type(value)}")
+        
+        # Ensure the value is a numpy array
+        if not hasattr(value, 'shape'):
+            raise ValueError(f"Expected value for key {key} to have a shape attribute.")
+        
+        # Print the shape of the array
+        print(key, value.shape)
+        
+
     seg_masks = generate_segmentation_masks(combined_arrays)
     preprocessed_arrays = swap_channels(seg_masks)
     save_arrays(preprocessed_arrays, destination_dir)
     file_paths = get_file_paths(destination_dir)
     for path in file_paths:
         to_patches(path, patch_size, stride)
+    # augment_dir = f"{destination_dir}/train/"
+    # process_and_augment_pickles(augment_dir, augment_dir, 5)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process some arrays.")
-    parser.add_argument('root_dir', type=str, help="The root directory containing the .pkl files.")
-    parser.add_argument('destination_dir', type=str, help="The directory to save the processed arrays in .pkl files.")
-
-    parser.add_argument('stride', type=int, help="stride for creating patches")
-    parser.add_argument('patch_size', type=int, help="width and heaight of patches")
+    parser.add_argument('--root_dir', type=str, help="The root directory containing the .pkl files.")
+    parser.add_argument('--destination_dir', type=str, help="The directory to save the processed arrays in .pkl files.")
+    parser.add_argument('--stride', type=int, help="stride for creating patches")
+    parser.add_argument('--patch_size', type=int, help="width and heaight of patches")
+    parser.add_argument('--num_augmentations', type=int, default=5, help="Number of augmentations per original file")
     args = parser.parse_args()
-    main(args.root_dir, args.destination_dir)
+    main(args.root_dir, args.destination_dir, args.stride, args.patch_size)
+
+
+# python preprocessing.py --root_dir "/home/k45848/multispectral-imagery-segmentation/data/original_data" --destination_dir "/home/k45848/multispectral-imagery-segmentation/data/21.07" --patch_size 64 --stride 16 
