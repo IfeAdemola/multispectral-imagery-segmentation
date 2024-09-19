@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colors
 import matplotlib.patches as mpatches
-import torch
 import os
 import pickle
 from matplotlib.colors import LinearSegmentedColormap
@@ -58,8 +57,8 @@ def display_input(array):
     image_corrected_rgb = image_corrected[..., ::-1]
     return image_corrected_rgb
 
-def display_label(array, label_structure):
-    cmap = mycmap(label_structure)
+def display_label(array, use_multiclass):
+    cmap = mycmap(use_multiclass)
 
     if len(cmap.colors) == 3:
         norm = colors.Normalize(vmin=0, vmax=2) # not sure which works better cuz some images have just 2 labels
@@ -173,21 +172,21 @@ def plot_label(array):
 #                                 ])
 #     return cmap
 
-def classnames(label_structure=False):
-    if label_structure:
+def classnames(use_multiclass=False):
+    if use_multiclass:
         names = ["Invalid", "Soil", "Low grass", "High grass", "Partial trees", "Forest"]
     else:
         names = ["Invalid", "Deforested", "Forest"]
     return names
 
-def labels(label_structure):
+def labels(use_multiclass):
     l = {}
-    for i, label in enumerate(classnames(label_structure)):
+    for i, label in enumerate(classnames(use_multiclass)):
         l[i] = label
         return l
 
-def mycmap(label_structure=False):
-    if label_structure:
+def mycmap(use_multiclass=False):
+    if use_multiclass:
         cmap = colors.ListedColormap(["#CCCCCC",
                                     "#D2B48C",
                                     "#90EE90",
