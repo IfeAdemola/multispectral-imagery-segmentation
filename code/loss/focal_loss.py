@@ -32,5 +32,3 @@ class FocalLoss(nn.Module):
         loss = loss * (targets.view(-1) != self.ignore_index).float()
 
         return loss.mean()
-
-
