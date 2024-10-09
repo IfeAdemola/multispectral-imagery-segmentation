@@ -10,27 +10,33 @@ import torch.optim.lr_scheduler as lr_scheduler
 from scipy.ndimage import binary_dilation, binary_erosion
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from torchvision.models import ResNet50_Weights
+from torchvision.ops import sigmoid_focal_loss
+# from torchvision.models import ResNet50_Weights
 from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
                                              deeplabv3_resnet50)
 
 import metrics
 import utils
 import wandb
+import torch.nn as nn
 from datasets import Forest, ToTensor
 from loss.focal_loss import FocalLoss
 from models.unet import UNet
 from models.FCN import FullyConvNet
 from argparse_config import get_args
 from model_trainer import ModelTrainer
+from train_model import TrainModel
 from torchgeo.models import FarSeg  # Example pretrained model on multispectral satellite data
 from torchgeo.trainers import SemanticSegmentationTask
-from torchgeo.models import ResNet50_Weights
+from torchgeo.models import ResNet50_Weights, ResNet18_Weights
 
 
-def wandb_setup(args, model_name, selected_bands, ls, max_epochs, model, criterion, optimiser, save_dir):
+def wandb_setup(args, model_name, selected_bands, ls, max_epochs, model, criterion, optimiser, pretrained_weights, save_dir):
     project_name = args.project_name
-    name = f"{model_name}_{str(selected_bands)}_{ls}"
+    if args.train_mode == "scratch":
+        name = f"{model_name}_{str(selected_bands)}_{ls}_{args.train_mode}"
+    else:
+        name = f"{model_name}_{str(selected_bands)}_{ls}_{args.pretrained_strategy}"
     current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # wandb initialisation
@@ -48,63 +54,153 @@ def wandb_setup(args, model_name, selected_bands, ls, max_epochs, model, criteri
                               metadata = {"epochs": max_epochs, "model": args.model,
                                            "batch_size": args.batch_size, "loss": criterion, 
                                            "optimiser": optimiser, "label": args.use_multiclass, 
-                                            "bands": selected_bands}  
+                                            "bands": selected_bands,
+                                            "pretrained_weights": str(pretrained_weights)}  
                             )
     
-    # artifact.add_file
+    artifact.add_file('best_model.pth')
 
-    # wandb.log_artifact(artifact)
+    wandb.log_artifact(artifact)
     
-def load_pretrained_model(args, model, model_name, num_classes, num_inputs):
-    if args.model == 'deeplab': 
-        model = "FarSeg(backbone='resnet50', num_classes)"
-    elif args.model == 'unet':
-        pretrained_weights = ResNet50_Weights.SENTINEL2_MI_RGB_SATLAS
-        task = SemanticSegmentationTask(
-            model="unet",
-            backbone="resnet50",                 # ResNet50 backbone
-            weights=pretrained_weights,          # Use Sentinel-2 pretrained weights
-            in_channels=num_inputs,                       # Modify based on your input channels (Sentinel-2 RGB in this case)
-            num_classes=num_classes,                       # Modify based on your classes (e.g., forest/deforested)
-            num_filters=64,                      # Adjust the number of filters if needed
-            freeze_backbone=True,                # Freeze the backbone for direct evaluation
-            freeze_decoder=True,                 # Freeze the decoder as well for direct evaluation
-            lr=0.001,                            # Learning rate (won't matter in this case since we aren't training)
-            loss='ce',                           # Cross-entropy loss (irrelevant for direct evaluation)
-        )
-        model = task.model()
+# def direct_evaluation(args, num_classes, num_inputs, pretrained_weights):
+#     task = SemanticSegmentationTask(
+#         model=args.model,
+#         backbone="resnet50",                
+#         weights=pretrained_weights,          
+#         in_channels=num_inputs,                       
+#         num_classes=num_classes,                      
+#         num_filters=64,                    
+#         freeze_backbone=True,                
+#         freeze_decoder=True,
+#     )
+#     task.model.eval()
 
-    # Freeze all layers for feature extraction (Direct Evaluation)
-    for param in model.parameters():
-        param.requires_grad = False
+#     # Freeze all layers
+#     for param in task.model.parameters():
+#         param.requires_grad = False
 
-    return model
+#     return task.model 
 
-def load_pretrained_model_with_partial_freezing(model_name, num_classes, num_inputs):
-    if model_name == 'deeplab':
-        # Load DeepLab pretrained model from TorchGeo
-        model = FarSeg(backbone='resnet50', num_classes=num_classes)
+# def fine_tune_all_layers(args, num_classes, num_inputs, pretrained_weights, class_weights, lr):
+#     task = SemanticSegmentationTask(
+#         model=args.model,
+#         backbone="resnet50",                
+#         weights=pretrained_weights,         
+#         in_channels=num_inputs,              
+#         num_classes=num_classes,  
+#         class_weights= class_weights,           
+#         freeze_backbone=False,               
+#         freeze_decoder=False,                
+#         lr=lr,                               
+#         loss='focal',                           
+#     )
+#     return task.model
 
-        # Modify input channels to match multispectral data
-        model.backbone.conv1 = torch.nn.Conv2d(num_inputs, 64, 
-                                               kernel_size=(7, 7), 
-                                               stride=(2, 2), 
-                                               padding=(3, 3), 
-                                               bias=False)
+# def fine_tune_last_layers(args, num_classes, num_inputs, pretrained_weights, class_weights, lr):
 
-        # Freeze backbone layers (i.e., ResNet50 backbone)
-        for param in model.backbone.parameters():
-            param.requires_grad = False  # Freeze these layers
-        
-    elif model_name == 'unet':
-        # For UNet model, you can do similar freezing for its encoder backbone (if using a pretrained one)
-        model = FarSeg(backbone='resnet50', num_classes=num_classes)
+#     task = SemanticSegmentationTask(
+#         model=args.model,
+#         backbone="resnet50",                 
+#         weights=pretrained_weights,          
+#         in_channels=num_inputs,                       
+#         num_classes=num_classes,    
+#         class_weights= class_weights,                    
+#         freeze_backbone=True,                
+#         freeze_decoder=False,                 
+#         lr=lr,                            
+#         loss='focal',                           
+#     )
 
-        # Freeze encoder backbone
-        for param in model.backbone.parameters():
+#     # Freeze encoder backbone
+#     # for param in model.backbone.parameters():
+#     #     param.requires_grad = False
+    
+#     # model.encoder.conv1 = torch.nn.Conv2d(
+#     #         num_inputs, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
+#     #     )
+
+#     return task.model
+
+def pretrained_strategy(args, num_classes, num_inputs, pretrained_weights, class_weights, lr):
+    assert args.train_mode == "pretrained" , "Training mode must be set to 'pretrained'."
+    if args.pretrained_strategy == 'direct_evaluation':
+        freeze_backbone=True,                
+        freeze_decoder=True
+    elif args.pretrained_strategy == 'fine_tune_all_layers':
+        freeze_backbone=False,
+        freeze_decoder=False
+    elif args.pretrained_strategy == 'fine_tune_last_layers':
+        freeze_backbone=True,
+        freeze_decoder=False
+    else:
+        raise ValueError("Invalid pretrained strategy. Select one of 'direct_evaluation', 'fine_tune_all_layers', 'fine_tune_last_layers' ")
+    
+    task = SemanticSegmentationTask(
+        model=args.model,
+        backbone="resnet18",                 
+        weights=pretrained_weights,          
+        in_channels=num_inputs,                       
+        num_classes=num_classes,    
+        class_weights= class_weights,                    
+        freeze_backbone=freeze_backbone,                
+        freeze_decoder=freeze_decoder,                 
+        lr=lr,                            
+        loss='focal',                           
+    )
+
+    if args.pretrained_strategy == 'direct_evaluation':
+        task.model.eval()
+        for param in task.model.parameters():
             param.requires_grad = False
 
+    return task.model
+    
+def initialise_model(args, pretrained_weights, num_classes, num_inputs, class_weights, lr):
+    # If training from scratch
+    if args.train_mode == "scratch":
+        task = SemanticSegmentationTask(
+            model=args.model,
+            backbone="resnet18",                
+            weights=None,  # No pretrained weights
+            in_channels=num_inputs,   
+            num_classes=num_classes,
+            class_weights=class_weights,
+            lr=lr,
+            loss='focal'   
+
+        )
+        model = task.model
+    
+    # If using pretrained weights strategy
+    elif args.train_mode == "pretrained":
+        # Use the new pretrained_strategy function
+        model = pretrained_strategy(
+            args=args,
+            num_classes=num_classes,
+            num_inputs=num_inputs,
+            pretrained_weights=pretrained_weights,
+            class_weights=class_weights,
+            lr=args.lr
+        )
+
+    # Move the model to GPU if available
+    if args.use_gpu:
+        model = model.cuda()
+
     return model
+
+
+# def initialise_model(args, pretrained_weights, num_classes, num_inputs, class_weights):
+#     if args.train_mode == "scratch":
+#         if args.model == 'unet':
+#             model = UNet(n_classes=num_classes,
+#                         n_channels=num_inputs)
+#         elif args.model == 'deeplabv3':
+#             model = deeplabv3_resnet50(weights=pretrained_weights)
+#             model.classifier[4] = torch.nn.Conv2d(256, num_classes, kernel_size=(1, 1), stride=(1, 1))
+#     elif args.train_mode == "pretrained":
+#         model = pretrained_strategy(args, num_classes, num_inputs, pretrained_weights, class_weights, args.lr)
+    # return model
 
 def save_model_checkpoint():
     pass
@@ -188,27 +284,7 @@ def main():
         print(f"images.shape: {X.shape}")
         print(f"labels.shape: {Y.shape}")
         break
-
-    # set up network
-    if args.model == "deeplab":
-        weights_backbone = ResNet50_Weights.DEFAULT
-        model = deeplabv3_resnet50(weights=None, 
-                                   weights_backbone=weights_backbone, 
-                                   num_classes=num_classes)
-        model.backbone.conv1 = torch.nn.Conv2d(num_inputs, 64, 
-                                               kernel_size=(7, 7), 
-                                               stride=(2, 2), 
-                                               padding=(3, 3), 
-                                               bias=False)
-    elif args.model == 'unet':
-        model = UNet(n_classes=num_classes,
-                     n_channels=num_inputs)
-    elif args.model == 'fcn':
-        model = FullyConvNet(input_channels=num_inputs,
-                    num_classes=num_classes)
-        
-    if args.use_gpu:
-        model = model.cuda()
+     
 
     # define number of epochs
     max_epochs = args.max_epochs 
@@ -217,29 +293,31 @@ def main():
     use_multiclass = args.use_multiclass
     ls = 1 if use_multiclass else 0
 
+    print(f"args.alpha: {args.alpha}")
     if args.alpha and len(args.alpha) == num_classes:
         alpha = torch.tensor(args.alpha, dtype=torch.float32).cuda()
     else:
         raise ValueError(f"The length of alpha must be {num_classes} for the segmentation map.")
+    print(f"alpha: {alpha}")
 
+    if num_inputs == 3:
+        pretrained_weights = ResNet18_Weights.SENTINEL2_RGB_SECO #ResNet18_Weights.SENTINEL2_RGB_MOCO
+    elif num_inputs == 10:
+        pretrained_weights = ResNet18_Weights.SENTINEL2_ALL_MOCO
 
-    finetune = False
-    if finetune:
-        # pretrained model
-        model = load_pretrained_model(args, model, model_name, num_classes, num_inputs)
-        finetune_lr = args.lr*0.1
-        optimiser = torch.optim.Adam(model.parameters(), lr=finetune_lr)
-        scheduler = lr_scheduler.CosineAnnealingLR(optimiser, T_max=max_epochs)
-    else:
-        # Create the focal loss criterion and the optimiser
-        criterion = FocalLoss(alpha=alpha, gamma=args.gamma, ignore_index=0) # gamma=0: Crossentropyloss
-        optimiser = torch.optim.Adam(model.parameters(), lr=args.lr)
-        scheduler = lr_scheduler.CosineAnnealingLR(optimiser, T_max=max_epochs)
+    # model = initialise_model(args, pretrained_weights, num_classes, num_inputs, alpha, args.lr)
+    model = UNet(n_classes=num_classes, n_channels=num_inputs)
+    model = model.cuda()
 
-    
+    # Set up other training components (criterion, optimiser, scheduler)
+    # criterion = FocalLoss(alpha=alpha, gamma=args.gamma)
+    criterion = nn.CrossEntropyLoss(weight=alpha)
+    optimiser = torch.optim.Adam(model.parameters(), lr=args.lr)
+    # optimiser = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimiser, T_max=max_epochs)  
 
     # setup wandb
-    wandb_setup(args, model_name, selected_bands, ls, max_epochs, model, criterion, optimiser, save_dir)
+    wandb_setup(args, model_name, selected_bands, ls, max_epochs, model, criterion, optimiser, pretrained_weights, save_dir)
     # train network 
     trainer = ModelTrainer(args)
     model = trainer.train(use_multiclass, model, train_loader, val_loader, criterion, optimiser, scheduler, max_epochs)
