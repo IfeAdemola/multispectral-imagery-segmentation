@@ -11,7 +11,7 @@ from typing import List, Dict, Any
 
 RGB = [0, 1, 2]
 NIR = [6]
-RED_EDGE = [3, 4, 5, 7]
+RED_EDGE = [3, 4, 5]
 SWIR = [7, 8, 9]
 SEASON = [10]
 
@@ -81,7 +81,7 @@ class Forest(Dataset):
                  use_swir=False, use_season=False, apply_augmentations=False):
         """
         Args:
-            root_dir (string): Directory with pickle files.
+            root_dir (str): Directory with pickle files.
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
@@ -92,11 +92,10 @@ class Forest(Dataset):
         # make sure parameters are okay
         if not (use_rgb or use_red or use_nir or use_red_edge or use_swir or use_season):
             print("No input specified; defaulting to RGB usage.")
-            # raise ValueError("No input specified, set at least one of "
-            #                  + "use_[rgb, lr, mr, season] to True!")
+            use_rgb = True
 
-        # make sure parent dir exists
-        assert os.path.exists(root_dir)
+        # make sure root dir exists
+        assert os.path.exists(root_dir), f"Directory {root_dir} does not exist"
         self.root_dir = root_dir
 
         self.use_rgb = use_rgb
@@ -112,7 +111,8 @@ class Forest(Dataset):
 
         self.n_inputs = get_ninputs(use_rgb, use_red, use_nir, use_red_edge, use_swir, use_season)
 
-        self.num_classes = 6 if use_multiclass else 3
+        # self.num_classes = 6 if use_multiclass else 3
+        self.num_classes = 3 if use_multiclass else 2
 
         self.transform = transform
         self.file_list = [f for f in os.listdir(root_dir) if f.endswith('.pkl')]
@@ -130,13 +130,20 @@ class Forest(Dataset):
         with open(file_name, 'rb') as f:
             sample = pickle.load(f)
 
+        # Validate the number of channels in the dataset
+        # assert sample.shape[2] >= 13, f"Sample has fewer than 13 channels: {sample.shape[2]} channels found."
+
         sensor_image = sample[:, :, self.selected_bands]
-        mask = sample[:, :, 12] if self.use_multiclass else sample[:, :, 11]
+        ### 07_10: I have just changed the class structure, binary is deforested and others, multiclass is anthropogenic, deforested and forest
+        mask = sample[:, :, 13] if self.use_multiclass else sample[:, :, 12]
 
         return sensor_image, mask
 
     def get_augmentation(self, image, mask, aug_idx):
-        """Applies augmentation based on aug_idx."""
+        """
+        Applies augmentation to the image and mask based on the provided index.
+        Augmentation includes rotations and optional Gaussian noise.
+        """
         rotations = [
             (image, mask),               # Original image and mask
             (rotate_90(image), rotate_90(mask)),    # 90 degrees
@@ -169,10 +176,9 @@ class Forest(Dataset):
         sensor_image = torch.from_numpy(sensor_image).float()  # Shape: (H, W, Channels)
         mask = torch.from_numpy(mask).long()  # Mask is a 2D tensor
 
-        # Apply any additional transformations (e.g., random crops)
         if self.transform:
-            sensor_image, mask = self.transform((sensor_image, mask)) #maybe if I feel like normalising to range -1 and 1
-   
+            sensor_image, mask = self.transform((sensor_image, mask)) 
+
         return sensor_image, mask
     
 
