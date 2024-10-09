@@ -60,10 +60,10 @@ def display_input(array):
 def display_label(array, use_multiclass):
     cmap = mycmap(use_multiclass)
 
-    if len(cmap.colors) == 3:
-        norm = colors.Normalize(vmin=0, vmax=2) # not sure which works better cuz some images have just 2 labels
-    elif len(cmap.colors) == 6:
-        norm = colors.Normalize(vmin=0, vmax=5)
+    if len(cmap.colors) == 2:
+        norm = colors.Normalize(vmin=0, vmax=1) # not sure which works better cuz some images have just 2 labels
+    elif len(cmap.colors) == 3:
+        norm = colors.Normalize(vmin=0, vmax=2)
     array = cmap(norm(array))
     array_uint8 = (array * 255).astype(np.uint8)
 
@@ -174,9 +174,9 @@ def plot_label(array):
 
 def classnames(use_multiclass=False):
     if use_multiclass:
-        names = ["Invalid", "Soil", "Low grass", "High grass", "Partial trees", "Forest"]
+        names = ["Invalid", "Deforested" , "Forest"] # "Soil", "Low grass", "High grass", "Partial trees"
     else:
-        names = ["Invalid", "Deforested", "Forest"]
+        names = ["Invalid", "Deforested"] #, "Forest"
     return names
 
 def labels(use_multiclass):
@@ -189,14 +189,13 @@ def mycmap(use_multiclass=False):
     if use_multiclass:
         cmap = colors.ListedColormap(["#CCCCCC",
                                     "#D2B48C",
-                                    "#90EE90",
-                                    "#006400",
-                                    "#556B2F",
-                                    "#228B22"])  # ,"#FFFFFF"
+                                    "#228B22"])  # ,"#FFFFFF" "#90EE90","#006400","#556B2F",
+                                    
+                                    
     else:
         cmap = colors.ListedColormap(["#CCCCCC",
                                       "#D2B48C",
-                                      "#228B22"])
+                                      ]) #"#228B22"
     return cmap
 
 def mypatches():
