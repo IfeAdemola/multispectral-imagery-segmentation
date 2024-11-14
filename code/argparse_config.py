@@ -18,16 +18,16 @@ def get_args():
     parser.add_argument('--use_red_edge', action='store_true', default=False,
                         help='use sentinel-2 red edge bands')
     parser.add_argument('--use_season', action='store_true', default=False,
-                        help='use weather season high-resolution bands')
+                        help='use weather season band')
                         
     # training hyperparameters
-    parser.add_argument('--lr', type=float, default=0.01,
-                        help='learning rate (default: 1e-2)')
-    parser.add_argument('--batch_size', type=int, default=32,
+    parser.add_argument('--lr', type=float, default=0.00001,
+                        help='learning rate (default: 1e-4)')
+    parser.add_argument('--batch_size', type=int, default=256,
                         help='batch size for training and validation \
-                              (default: 32)')
+                              (default: 256)')
     parser.add_argument('--max_epochs', type=int, default=100,
-                        help='number of training epochs (default: 50)')
+                        help='number of training epochs (default: 100)')
     
     # loss arguments
     # alpha and gamma arguments
@@ -35,9 +35,11 @@ def get_args():
     parser.add_argument('--gamma', type=float, default=2, help='Gamma value for Focal Loss (default: 2)')
 
     # network
-    parser.add_argument('--model', type=str, choices=['deeplab', 'unet', 'fcn'],
-                        default='deeplab',
+    parser.add_argument('--model', type=str, choices=['deeplabv3+', 'unet'],
+                        default='unet',
                         help="network architecture (default: unet)")
+#     parser.add_argument('--use_gpu', type=bool, default=True,
+#                         help='use gpu for training')
     
     #deeplab-specific
     parser.add_argument('--pretrained_backbone', action='store_true',
@@ -47,6 +49,14 @@ def get_args():
     parser.add_argument('--out_stride', type=int, choices=[8, 16], default=16,
                         help='network output stride (default: 16)')
 
+    # training strategy
+    parser.add_argument('--train_mode', type=str, default='scratch', choices=['scratch', 'pretrained'],
+                        help='Whether to train from scratch or use a pretrained strategy')
+    parser.add_argument('--pretrained_strategy', type=str, default='fine_tune_all_layers',
+                        choices=['direct_evaluation', 'fine_tune_all_layers', 'fine_tune_last_layers'],
+                        help='Pretrained strategy to use if train_mode is pretrained')
+
+    
     # data
     parser.add_argument('--data_dir_train', type=str, default=None,
                         help='path to training dataset')
@@ -60,6 +70,7 @@ def get_args():
                         help='wandb project name')
     parser.add_argument('--save_dir', type=str, default="./trained_models",
                         help='path to save model')
+    
 
     return parser.parse_args()
 
