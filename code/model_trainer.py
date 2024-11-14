@@ -59,7 +59,7 @@ class ModelTrainer:
                     train_conf_mat.add_batch(labels, preds)
 
                     # Update progress bar
-                    pbar.set_postfix(loss=epoch_loss/(pbar.n+1) * train_loader.batch_size)
+                    pbar.set_postfix(loss=epoch_loss / (pbar.n + 1))
                     pbar.set_description("[Train] Loss: {:.4f}".format(
                     round(loss.item(), 4)))       
                     
@@ -119,6 +119,7 @@ class ModelTrainer:
 
                     # Update progress bar
                     pbar.set_postfix(loss=val_loss/(pbar.n+1) * dataloader.batch_size) #loss=f"{batch_loss.item():.4f}"
+                    pbar.set_postfix(loss=val_loss / (pbar.n + 1))
                     pbar.set_description("[Val] AA: {:.2f}%, IoU: {:.2f}%".format(aa , miou * 100))            
 
     
@@ -127,14 +128,27 @@ class ModelTrainer:
                 # Average loss and IoU over the evaluation dataset
                 avg_epoch_loss = val_loss / len(dataloader.dataset)
                 val_iou = conf_mat.get_IoU()
+                val_aa = conf_mat.get_aa()
                 val_miou = conf_mat.get_mIoU()
+                val_precision = conf_mat.get_precision()
+                val_recall = conf_mat.get_recall()
+                val_mf1 = conf_mat.get_mF1_score()
+                val_f1 = conf_mat.get_F1_score()
+                val_dice_coeff = conf_mat.get_dice_coefficient()
                 print(f'[Val] Average epoch loss: {avg_epoch_loss:.4f}')
 
                 # Log metrices and loss
                 # class_names = utils.classnames()
                 class_names = utils.classnames(use_multiclass)[1:]
                 val_metrics = {f"Val IoU {class_name}": iou for class_name, iou in zip(class_names, val_iou)}
+                val_metrics.update({f"Val Precision {class_name}": precision for class_name, precision in zip(class_names, val_precision)})
+                val_metrics.update({f"Val Recall {class_name}": recall for class_name, recall in zip(class_names, val_recall)})
+                val_metrics.update({f"Val F1 {class_name}": f1 for class_name, f1 in zip(class_names, val_f1)})
+                val_metrics.update({f"Val Dice Coefficient {class_name}": dice_coeff for class_name, dice_coeff in zip(class_names, val_dice_coeff)})
+                
                 val_metrics["Val overall IoU"] = val_miou
+                val_metrics["Val AA"] = val_aa
+                val_metrics["Val overall F1"] = val_mf1
                 val_metrics["Val loss"] = avg_epoch_loss
                 val_metrics["epoch"] = epoch + 1
                 wandb.log(val_metrics)     
@@ -149,7 +163,7 @@ class ModelTrainer:
                         )
                     })
 
-                # # Log input image, groundtruth and prediction
+                # Log input image, groundtruth and prediction
                 if (epoch +1) % 10 == 0:
                     random_idx = np.random.randint(preds.size(0))
                     in_log = images[random_idx, ...]
@@ -166,8 +180,32 @@ class ModelTrainer:
                     images_log = [input_log, gt_log, masked_pred_log]
 
                     wandb.log({"Images": [wandb.Image(i) for i in images_log]})
+
+                if (epoch + 1) % 10 == 0:
+                    # Randomly select 10 indices from the predictions
+                    random_indices = np.random.choice(preds.size(0), size=10, replace=False)  # Choose 10 unique indices
+                    images_log = []  # List to store the images for logging
+
+                    for idx in random_indices:
+                        in_log = images[idx, ...]
+                        in_log = in_log.permute(1, 2, 0)
+                        input_log = utils.display_input(in_log.cpu().numpy())
+                        gt_log = utils.display_label(labels[idx, ...].cpu().numpy(), use_multiclass)
+
+                        # Validity mask (0: invalid 1: valid). Just for display so that it would still show class 0
+                        pred_display_mask = (labels[idx, ...].cpu().numpy() != 0).astype(np.uint8)
+                        masked_pred = preds[idx, ...].cpu().numpy() * pred_display_mask
+
+                        # Display the masked predictions
+                        masked_pred_log = utils.display_label(masked_pred, use_multiclass)
+
+                        # Append the images to the log list
+                        images_log.extend([input_log, gt_log, masked_pred_log])
+
+                    # Log all images at once
+                    wandb.log({"Images": [wandb.Image(i) for i in images_log]})
                 
-                model.train()
+                # model.train()
               
                     
     def create_weight_mask(self, labels, high_conf_weight=1.0, low_conf_weight=0.5, structure_size=3):
