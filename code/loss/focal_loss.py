@@ -8,9 +8,9 @@ class FocalLoss(nn.Module):
         self.gamma = gamma
         self.ignore_index = ignore_index
 
-    def forward(self, inputs, targets):
+    def forward(self, outputs, targets):
         # Convert inputs to probabilities
-        logpt = nn.functional.log_softmax(inputs, dim=1)
+        logpt = nn.functional.log_softmax(outputs, dim=1)
         pt = torch.exp(logpt)
 
         # Gather the log-probabilities at the indices of the target class
@@ -32,3 +32,4 @@ class FocalLoss(nn.Module):
         loss = loss * (targets.view(-1) != self.ignore_index).float()
 
         return loss.mean()
+
