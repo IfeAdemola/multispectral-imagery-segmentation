@@ -135,25 +135,71 @@ def pretrained_strategy(args, num_classes, num_inputs, pretrained_weights, class
     else:
         raise ValueError("Invalid pretrained strategy. Select one of 'direct_evaluation', 'fine_tune_all_layers', 'fine_tune_last_layers' ")
     
-    task = SemanticSegmentationTask(
+    if num_inputs == 10:
+
+        task = SemanticSegmentationTask(
         model=args.model,
         backbone="resnet18",                 
         weights=pretrained_weights,          
-        in_channels=num_inputs,                       
+        in_channels=13,                       
         num_classes=num_classes,    
         class_weights= class_weights,                    
         freeze_backbone=freeze_backbone,                
         freeze_decoder=freeze_decoder,                 
         lr=lr,                            
-        loss='focal',                           
-    )
+        loss='focal')  
 
+        state_dict = pretrained_weights.get_state_dict() 
+                            
+        # Step 1: Extract the weights of the first convolution layer (conv1)
+        conv1_weights = state_dict['conv1.weight']  # Shape: [64, 13, 7, 7]
+
+        # Step 2: Remove the input channels at indices 0, 9, and 10
+        # Use torch.index_select to keep only the channels we want (1-8, 11-12)
+        keep_indices = [i for i in range(conv1_weights.shape[1]) if i not in [0, 9, 10]]
+        conv1_weights_reduced = conv1_weights[:, keep_indices, :, :]  # Shape becomes [64, 10, 7, 7]
+
+        # Step 3: Update the model's first convolution layer with the new weights
+        # You must also modify the model's architecture to accept 10 input channels
+        # Example using a new model with 10 input channels:
+        model = task.model  # Assuming your task model is already defined
+
+        # Modify the first convolution layer to accept 10 input channels
+        model.encoder.conv1 = nn.Conv2d(in_channels=10, 
+                                        out_channels=64, 
+                                        kernel_size=7, 
+                                        stride=2, 
+                                        padding=3, 
+                                        bias=False)
+
+        # Assign the modified weights to the model's first conv layer
+        model.encoder.conv1.weight.data = conv1_weights_reduced
+
+        # Ensure other layers are still initialized with pretrained weights
+        model.load_state_dict(state_dict, strict=False)
+    else:
+        task = SemanticSegmentationTask(
+            model=args.model,
+            backbone="resnet18",                 
+            weights=pretrained_weights,          
+            in_channels=num_inputs,                       
+            num_classes=num_classes,    
+            class_weights= class_weights,                    
+            freeze_backbone=freeze_backbone,                
+            freeze_decoder=freeze_decoder,                 
+            lr=lr,                            
+            loss='focal',                           
+        )
+
+        model = task.model
+
+    
     if args.pretrained_strategy == 'direct_evaluation':
         task.model.eval()
         for param in task.model.parameters():
             param.requires_grad = False
 
-    return task.model
+    return model
     
 def initialise_model(args, pretrained_weights, num_classes, num_inputs, class_weights, lr):
     # If training from scratch
@@ -301,19 +347,19 @@ def main():
     print(f"alpha: {alpha}")
 
     if num_inputs == 3:
-        pretrained_weights = ResNet18_Weights.SENTINEL2_RGB_SECO #ResNet18_Weights.SENTINEL2_RGB_MOCO
+        pretrained_weights = ResNet18_Weights.SENTINEL2_RGB_MOCO #ResNet18_Weights.SENTINEL2_RGB_MOCO
     elif num_inputs == 10:
         pretrained_weights = ResNet18_Weights.SENTINEL2_ALL_MOCO
 
-    # model = initialise_model(args, pretrained_weights, num_classes, num_inputs, alpha, args.lr)
-    model = UNet(n_classes=num_classes, n_channels=num_inputs)
+    model = initialise_model(args, pretrained_weights, num_classes, num_inputs, alpha, args.lr)
+    # model = UNet(n_classes=num_classes, n_channels=num_inputs)
     model = model.cuda()
 
     # Set up other training components (criterion, optimiser, scheduler)
-    # criterion = FocalLoss(alpha=alpha, gamma=args.gamma)
-    criterion = nn.CrossEntropyLoss(weight=alpha)
-    optimiser = torch.optim.Adam(model.parameters(), lr=args.lr)
-    # optimiser = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    criterion = FocalLoss(alpha=alpha, gamma=args.gamma)
+    # criterion = nn.CrossEntropyLoss(weight=alpha)
+    optimiser = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.00001)
+    # optimiser = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.99)
     scheduler = lr_scheduler.CosineAnnealingLR(optimiser, T_max=max_epochs)  
 
     # setup wandb
