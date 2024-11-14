@@ -13,12 +13,12 @@ def rotate_270(array):
     """Rotate the array by 270 degrees clockwise."""
     return np.rot90(array, k=1, axes=(0, 1)).copy()
 
-def add_gaussian_noise(array, mean=0, std=0.003):
+def add_gaussian_noise(array, mean=0, std=0.006):
     """Add Gaussian noise to the image array (mask is excluded as input to this function)"""
     noise = np.random.normal(mean, std, array.shape)
     noisy_image = (array + noise).copy()
 
-    # Clip the values to ensure they stay within the range (-1, 1)
+    # Clip the values to ensure they stay within the range (0, 1)
     noisy_image = np.clip(noisy_image, 0, 1)
     
     # Combine with the rest of the array
