@@ -2,6 +2,20 @@
 
 This repository is the official implementation of [Weakly Supervised Semantic Segmentation of Multispectral Satellite Imagery for Land Cover Mapping](https://cloud.fiw.fhws.de/s/MYMzYoXPRjgNeYs)
 
+## Abstract 
+This thesis investigates the automation of deforestation detection using deep learning
+models applied to weakly annotated multispectral data from Sentinel-2 satellite. The research
+explores the performance of U-Net and DeepLabV3+ models under various training
+strategies, demonstrating that deep learning methods can effectively localise deforested
+areas, significantly outperforming traditional methods like Otsu thresholding. Despite
+improvements in recall and Intersection over Union (IoU) metrics, the findings reveal
+challenges related to model precision and the presence of false positives, emphasising the
+need for improved annotation quality and training techniques. These results underscore
+the complexities of leveraging multispectral data for deforestation monitoring and provide
+a foundation for future enhancements in remote sensing.
+
+![Image and Segmentation Mask](Documentation/Images/Image_and_mask.png)
+
 ## Requirements
 To install requirements:
 
@@ -46,5 +60,7 @@ bash train.sh --data_dir_train </path/to/train_data> --lr 0.001 --batch_size 128
 
 
 ## Results
-Our models achieve the following performance on:
+Our models achieve the following performance on UNet and Deeeplabv3+:
+![Evaluation of test dataset](Documentation/Images/Results.png)
+![Model predictions](Documentation/Images/Preds.png)
 
